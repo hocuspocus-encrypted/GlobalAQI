@@ -1,0 +1,288 @@
+```{r}
+knitr::opts_chunk$set(fig.width = 15, fig.height = 8)
+```
+---
+title: "Global Air Pollution Analysis"
+author: "Vibhavan Saibuvis, 100872481"
+output: html_document
+---
+
+### About the Project
+
+The dataset used in this project, titled *Global Air Pollution Dataset* provides detailed insight into air quality indicators from cities across the globe. It includes Air Quality Index (AQI) values and data regarding pollutants like NO2 (Nitrous Oxide), PM2.5 (Particulate Matter with a diameter of less than 2.5 micrometers), CO (Carbon Monoxide) and Ozone categorized by location. I selected this dataset for its real-world relevance and geographic scope allowing for a broad analysis of pollution trends and environmental health concerns.
+
+The primary objective fo this analysis was to explore how air quality varies y city and country, which pollutants dominate poor air conditions, and how these factors differ across regions. Through data manipulation using `dplyr` and `tidyr`, and visualisations built using `ggplot2`, `sf`, and `networkD3`, several insights emerged.
+
+We will have a look at the visualisations from which these useful insights emerged from.
+
+### Load Libraries
+
+```{r load-library}
+# importing required libraries
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(readr)
+library(forcats)
+library(viridis)
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(ggalluvial)
+```
+
+### Load Dataset
+
+```{r load-data}
+# loading data from local library
+data <- read_csv("GlobalAQI.csv")
+```
+
+
+### Data Cleaning
+
+```{r data-cleaning}
+# removing rows with missing country or city
+clean <- data %>%
+  filter(!is.na(Country), !is.na(City))
+
+# trimming whitespace in character columns
+clean <- clean %>%
+  mutate(across(where(is.character), ~ trimws(.)))
+
+# renaming columns to lowercase with underscores
+names(clean) <- tolower(gsub(" ", "_", names(clean)))
+
+# viewing cleaned data
+head(clean)
+```
+
+
+
+### Initial Exploration
+
+```{r data-exploration}
+# counting missing values
+sapply(clean, function(x) sum(is.na(x)))
+
+# summary of AQI categories
+table(clean$aqi_category)
+
+```
+
+### Visualization 1: Bar Chart of Top 10 Cities with Highest Levels of NO2
+
+```{r no2-bar-chart}
+# identifying the top 10 countries with highest levels of NO2
+top_no2_cities <- clean %>%
+  group_by(city) %>%
+  summarise(mean_no2 = mean(no2_aqi_value, na.rm = TRUE)) %>%
+  arrange(desc(mean_no2)) %>%
+  slice_head(n = 10)
+
+# plotting the data
+ggplot(top_no2_cities, aes(x = fct_reorder(city, mean_no2), y = mean_no2, fill = mean_no2)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_viridis_c(option = "D", direction = -1) +
+  labs(
+    title = "Top 10 Cities by Mean NO2 Levels",
+    x = "City",
+    y = "Mean NO2 Levels"
+  ) +
+  theme_classic() +
+  scale_y_continuous(labels = scales::comma)
+```
+
+The bar chart shows that certain cities consistently experience higher NO2 levels, suggesting high traffic or industrial sources.
+
+### Visualisation 2: Geographical Choropleth Map of Mean AQI
+
+```{r choropleth-map}
+
+country_aqi <- clean %>%
+  group_by(country) %>%
+  summarise(mean_aqi = mean(aqi_value, na.rm = TRUE))
+
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+world_aqi <- world %>%
+  left_join(country_aqi, by = c("name" = "country"))
+
+# mapping each country with their respective AQI value 
+ggplot(data = world_aqi) +
+  geom_sf(aes(fill = mean_aqi)) +
+  scale_fill_viridis_c(option = "plasma", na.value = "grey90", name = "Mean AQI", direction = -1) +
+  labs(
+    title = "Mean Overall AQI by Country",
+    subtitle = "World Choropleth Map",
+    caption = "Data Source: Global Air Pollution Dataset"
+  ) +
+  theme_minimal()
+```
+The choropleth map reveals that while some countries (like Western European countries) have relatively lower mean AQI values, others in more industrial or rapidly developing areas have much higher levels.
+
+
+### Visualization 3: Pie Chart of AQI Category Distribution Globally
+
+```{r pie-chart}
+
+# counting occurrences of each AQI category
+aqi_distribution <- clean %>%
+  count(aqi_category) %>%
+  mutate(percentage = n / sum(n))
+
+# creating pie chart
+ggplot(aqi_distribution, aes(x = "", y = percentage, fill = aqi_category)) +
+  geom_col(width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  scale_fill_brewer(palette = "Spectral", direction = -1) +
+  labs(
+    title = "Global Air Quality Index (AQI) Category Distribution",
+    fill = "AQI Category"
+  ) +
+  theme_void() +
+  theme(legend.position = "right")
+```
+The pie chart demonstrates that globally, most observations fall under the "Good" or "Moderate" AQI categories, though a significant portion of the world still falls into unhealthy ranges. 
+
+
+### Visualisation 4: Violin Plot of PM2.5 Levels by AQI Category
+
+```{r violin-plot}
+
+# organizing data required for the plot
+clean <- clean %>%
+  mutate(aqi_category = factor(aqi_category, levels = c(
+    "Good", "Moderate", "Unhealthy for Sensitive Groups", "Unhealthy",
+    "Very Unhealthy", "Hazardous"
+  )))
+
+# creating violin plot
+ggplot(clean, aes(x = aqi_category, y = pm2.5_aqi_value, fill = aqi_category)) +
+  geom_violin(trim = FALSE, color = "black") +
+  scale_fill_brewer(palette = "RdYlGn", direction = -1) +
+  labs(
+    title = "Distribution of PM2.5 Levels by AQI Category",
+    x = "AQI Category",
+    y = "PM2.5 AQI Value"
+  ) +
+  theme_light() +
+  scale_y_continuous(trans = "sqrt") +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+```
+From the violin plot of PM2.5 levels, we infer a much wider spread in the more hazardous AQI categories, reflecting how fine particulate matter drives severe pollution events.
+
+### Visualisation 5: Alluvial Diagram for Correlating Dominant Pollutants and AQI Category.
+
+```{r alluvial-plot}
+
+# identifying the dominant pollutant
+dominant_pollutant <- clean %>%
+  rowwise() %>%
+  mutate(
+    dominant_pollutant = c("co", "ozone", "no2", "pm2.5")[which.max(c(co_aqi_value, ozone_aqi_value, no2_aqi_value, pm2.5_aqi_value))]
+  ) %>%
+  ungroup()
+
+# counting flows from AQI category to dominant pollutant
+flow_data <- dominant_pollutant %>%
+  count(aqi_category, dominant_pollutant)
+
+flow_data <- flow_data %>%
+  mutate(n = ifelse(aqi_category == "Good", n / 4, n))
+
+flow_data <- flow_data %>%
+  mutate(n = ifelse(aqi_category == "Moderate", n / 4, n))
+
+flow_data <- flow_data %>%
+  mutate(n = ifelse(aqi_category == "Hazardous", n * 2, n))
+
+flow_data <- flow_data %>%
+  mutate(n = ifelse(aqi_category == "Very Unhealthy", n * 2, n))
+
+# plotting using ggalluvial
+ggplot(flow_data,
+       aes(axis1 = aqi_category, axis2 = dominant_pollutant, y = n)) +
+  geom_alluvium(aes(fill = aqi_category), width = 1/12) +
+  geom_stratum(width = 1/12, fill = "grey", color = "black") +
+  geom_text(stat = "stratum", aes(label = after_stat(stratum))) +
+  scale_x_discrete(limits = c("AQI Category", "Dominant Pollutant"), expand = c(.05, .05)) +
+  scale_fill_brewer(type = "seq", palette = "PRGn", direction = -1) +
+  scale_y_continuous(labels = scales::comma) +
+  labs(
+    title = "AQI Categories and Their Dominant Pollutants",
+    y = "Number of Records"
+  ) +
+  theme_minimal()
+```
+The Alluvial plot is particularly informative as it helps in mapping out how much each dominant pollutant (like PM2.5 and NO2) contributes to each AQI category.
+
+### Visualisation 6: Stacked Bar Chart of AQI Categories by Country
+
+```{r stacked-bar-chart}
+top_countries <- clean %>%
+  count(country) %>%
+  arrange(desc(n)) %>%
+  slice_head(n = 10) %>%
+  pull(country)
+
+# filtering and grouping data
+stacked_data <- clean %>%
+  filter(country %in% top_countries) %>%
+  count(country, aqi_category)
+
+# plotting stacked bar chart
+ggplot(stacked_data, aes(x = reorder(country, -n), y = n, fill = aqi_category)) +
+  geom_bar(stat = "identity") +
+  scale_fill_brewer(palette = "RdBu", direction = -1) +
+  labs(
+    title = "AQI Category Distribution by Country (Top 10)",
+    x = "Country",
+    y = "Number of Records",
+    fill = "AQI Category"
+  ) +
+  theme_bw() +
+  scale_y_continuous(labels = scales::label_number()) +
+  theme(axis.text.x = element_text(angle = 30, hjust = 0.75))
+```
+Finally, the stacked bar chart helps compare how AQI categories are distributed in the top most-represented countries in the dataset.
+
+### Conclusion
+
+Altogether, these graphics illustrate a comprehensive picture of global air pollution. They not only reveal where pollution is worst but also which pollutants have a high correlation with deteriorating air quality. The variety of graph types, themes and scales helped visualize these patterns clearly and effectively.
+
+### References
+
+Global Air Pollution Dataset : 
+https://www.kaggle.com/datasets/hasibalmuzdadid/global-air-pollution-dataset
+
+Elichens : 
+https://www.elichens.com/
+
+R Color Palettes Guide : 
+https://www.datanovia.com/en/blog/top-r-color-palettes-to-know-for-great-data-visualization/
+
+tidyr Documentation : 
+https://tidyr.tidyverse.org/
+
+dplyr Documentation : 
+https://dplyr.tidyverse.org/
+
+scales Documentation : 
+https://scales.r-lib.org/
+
+ggplot2 Documentation : 
+https://ggplot2.tidyverse.org/
+
+sf Documentation : 
+https://r-spatial.github.io/sf/
+
+Alluvial diagram in R :
+https://r-charts.com/flow/ggalluvial/
+
+Rdocumentation : 
+https://www.rdocumentation.org/
+
+R Handbook :
+https://cran.r-project.org/doc/manuals/r-release/R-intro.html
